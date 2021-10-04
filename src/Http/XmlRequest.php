@@ -1,4 +1,4 @@
-<?php namespace Braceyourself\Yourmembership;
+<?php namespace Braceyourself\Yourmembership\Http;
 
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\PendingRequest;
@@ -6,7 +6,7 @@ use Spatie\ArrayToXml\ArrayToXml;
 use GuzzleHttp\Exception\ConnectException;
 use Illuminate\Http\Client\ConnectionException;
 
-class Request extends PendingRequest
+class XmlRequest extends PendingRequest
 {
     public function __construct(Factory $factory = null)
     {
@@ -42,7 +42,7 @@ class Request extends PendingRequest
 
                 $request = $this->buildClient()->request($method, $url, $options);
 
-                return tap(new Response($request, $request_method), function ($response) {
+                return tap(new XmlResponse($request, $request_method), function ($response) {
                     $response->cookies = $this->cookies;
                     $response->transferStats = $this->transferStats;
 

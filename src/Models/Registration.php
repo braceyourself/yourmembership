@@ -2,7 +2,7 @@
 
 use App\Jobs\ApiRequest;
 use App\Models\Wordpress\Srnt\User;
-use Braceyourself\Yourmembership\YourmembershipApi;
+use Braceyourself\Yourmembership\Client;
 
 /**
  * @property string $RegistrationID

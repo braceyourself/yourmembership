@@ -1,11 +1,14 @@
 <?php namespace Braceyourself\Yourmembership\Models;
 
+use Carbon\Carbon;
+
 /**
  * Class Event
  * @package Braceyourself\Yourmembership\Models
  */
 class Event extends Model
 {
+    protected $primaryKey = 'EventId';
 
     public function registrationCount()
     {
@@ -52,4 +55,24 @@ class Event extends Model
     {
         return $this->api()->getExportUrl($export_id);
     }
+
+    public function isNotPast()
+    {
+        return Carbon::parse($this->EndDate)->isAfter(today());
+    }
+
+    public function startsAfter(\Illuminate\Support\Carbon $subMonth)
+    {
+        return $subMonth->isBefore(Carbon::parse($this->StartDate));
+    }
+
+    public function registration($registration_id): Registration
+    {
+        return $this->api()->registration($registration_id);
+    }
+
+    /*******************************************************
+     * attributes
+     ******************************************************/
+
 }

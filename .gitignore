@@ -1,3 +1,5 @@
 .env
 .idea/
 vendor
+/.phpunit.result.cache
+/bootstrap/

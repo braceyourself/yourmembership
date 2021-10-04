@@ -1,17 +1,17 @@
-<?php namespace Braceyourself\Yourmembership;
-
+<?php namespace Braceyourself\Yourmembership\Http;
 
 use Illuminate\Support\Collection;
 use Mtownsend\XmlToArray\XmlToArray;
 
-class Response extends \Illuminate\Http\Client\Response
+class XmlResponse extends BaseResponse
 {
+
     public Collection $data;
     private $request_method;
     private $error_code;
     private $error_info;
 
-    public function __construct($response, $request_method)
+    public function __construct(\GuzzleHttp\Psr7\Response $response, $request_method)
     {
         parent::__construct($response);
 
@@ -22,6 +22,14 @@ class Response extends \Illuminate\Http\Client\Response
         $this->data = collect($data->get($request_method));
 
     }
+
+
+
+    public function getSessionId()
+    {
+        return $this->xml(['Session.Create', 'SessionID']);
+    }
+
 
     public function xml($key = null, $default = null)
     {
@@ -37,4 +45,8 @@ class Response extends \Illuminate\Http\Client\Response
         return data_get($this->decoded, $key, $default);
     }
 
+    public function toArray()
+    {
+        return $this->data->toArray();
+    }
 }

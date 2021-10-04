@@ -1,46 +1,41 @@
-<?php namespace VendorName\Skeleton\Tests;
+<?php namespace Braceyourself\Yourmembership\Tests;
 
 use Braceyourself\Yourmembership\YourmembershipServiceProvider;
-use Illuminate\Database\Eloquent\Factories\Factory;
-use Tests\CreatesApplication;
-use VendorName\Skeleton\SkeletonServiceProvider;
+use Illuminate\Cache\CacheServiceProvider;
+use Illuminate\Database\DatabaseServiceProvider;
+use Illuminate\Filesystem\FilesystemServiceProvider;
+use Illuminate\Foundation\Bootstrap\LoadEnvironmentVariables;
 
 class TestCase extends \Orchestra\Testbench\TestCase
 {
-
-    public function setUp(): void
-    {
-        parent::setUp();
-
-        Factory::guessFactoryNamesUsing(
-            fn (string $modelName) => 'Braceyourself\\Yourmembership\\Database\\Factories\\'.class_basename($modelName).'Factory'
-        );
-    }
+    protected $loadEnvironmentVariables = true;
 
     protected function getPackageProviders($app)
     {
         return [
+            DatabaseServiceProvider::class,
+            FilesystemServiceProvider::class,
+            CacheServiceProvider::class,
             YourmembershipServiceProvider::class,
         ];
     }
 
-    public function getEnvironmentSetUp($app)
+    protected function getBasePath()
     {
-        config()->set('database.default', 'testing');
+        return __DIR__ . '/../';
+    }
 
-
-        config([
-            'yourmembership.accounts' => [
-                "account" => [
-                    'api_version'    => null,
-                    'api_key'        => env('PUBLIC_KEY'),
-                    'private_key'    => env('PRIVATE_KEY'),
-                    'sa_passcode'    => env('SA_PASSCODE'),
-                    'usermeta_class' => null,
-                    'user_class'     => null,
-                ]
+    protected function getEnvironmentSetUp($app)
+    {
+        $app['config']->set('database.default', 'testing');
+        $app['config']->set([
+            'database.connections.testing' => [
+                'driver'   => 'sqlite',
+                'path'     => 'database.sqlite',
+                'database' => 'database',
             ]
         ]);
+
         /*
         $migration = include __DIR__.'/../database/migrations/create_skeleton_table.php.stub';
         $migration->up();

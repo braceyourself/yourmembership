@@ -1,6 +1,6 @@
 <?php namespace Braceyourself\Yourmembership\Models;
 
-use Braceyourself\Yourmembership\YourmembershipApi;
+use Braceyourself\Yourmembership\Clients\Client;
 use Illuminate\Database\Eloquent\Model as BaseModel;
 
 /**
@@ -11,14 +11,26 @@ use Illuminate\Database\Eloquent\Model as BaseModel;
 abstract class Model extends BaseModel
 {
     protected $guarded = [];
+    private ?Client $api_client;
+
+    public function __construct(array $attributes = [], Client $api = null)
+    {
+        parent::__construct($attributes);
+
+        if (!empty($attributes) && is_null($api)) {
+            throw new \Exception("Api Client required when creating " . static::class . " instance.");
+        }
+
+        $this->api_client = $api;
+    }
 
     public function isFillable($key)
     {
         return !$this->isGuarded($key);
     }
 
-    public function api(): YourmembershipApi
+    public function api(): Client
     {
-        return app()->make('yourmembership')->for($this);
+        return optional($this->api_client)->for($this);
     }
 }

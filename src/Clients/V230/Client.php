@@ -1,23 +1,21 @@
-<?php namespace Braceyourself\Yourmembership;
+<?php namespace Braceyourself\Yourmembership\Clients\V230;
 
-
-use App\Models\Wordpress\Srnt\User;
+use Arr;
+use Braceyourself\Yourmembership\Http\BaseRequest;
+use Braceyourself\Yourmembership\Http\XmlRequest;
+use Braceyourself\Yourmembership\Http\XmlResponse;
 use Braceyourself\Yourmembership\Models\Event;
-use Braceyourself\Yourmembership\Models\Model;
 use Braceyourself\Yourmembership\Models\Person;
 use Braceyourself\Yourmembership\Models\Registration;
-use Carbon\Carbon;
+use Cache;
 use Carbon\CarbonInterface;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Http\Client\Factory;
-use Illuminate\Http\Client\PendingRequest;
-use Illuminate\Support\Facades\Http;
-use Psy\Util\Str;
-use Spatie\ArrayToXml\ArrayToXml;
-use Symfony\Component\HttpFoundation\File\Exception\AccessDeniedException;
+use Exception;
+use Illuminate\Support\Collection;
+use Log;
+use Str;
 
 /**
- * Class YourmembershipApi
+ *
  * @method Auth_Authenticate    180
  * @method Auth_CreateToken    180
  * @method Convert_ToEasternTime    240
@@ -109,71 +107,43 @@ use Symfony\Component\HttpFoundation\File\Exception\AccessDeniedException;
  * @method Session_Abandon    90
  * @method Session_Create    999999999
  * @method Session_Ping
- *
- * @package Braceyourself\Yourmembership
- * @mixin Request
  */
-class YourmembershipApi
+class Client extends \Braceyourself\Yourmembership\Clients\Client
 {
-    const BASE_URL = 'https://api.yourmembership.com';
-    public static $cache_responses_for = 0;
-
-    private $session_id;
-    /**
-     * @var Factory
-     */
-    private $use_private_key;
-    private $call_data;
-    protected Model $for;
-
-    private Request $request;
-    private array $config;
-
-    /**
-     * YourmembershipApi constructor.
-     */
-    public function __construct(array $config)
-    {
-        $this->config = $config;
-    }
-
-    public function config($key, $default = null)
-    {
-        return data_get($this->config, $key, $default) ?? $default;
-    }
+    protected $auth_path = "Session.Create";
 
     public function __call($name, $arguments)
     {
         $this->ensureSessionIdPresent();
 
-        $method = \Str::of($name)->replace('_', '.');
+        $method = Str::of($name)->replace('_', '.');
 
         $this->use_private_key = $method->lower()->startsWith('sa');
-        $this->call_data = \Arr::first($arguments);
+        $this->call_data = Arr::first($arguments);
 
-        \Log::channel('outgoing')->info("$method", \Arr::wrap($this->call_data));
+        Log::channel('outgoing')->info("$method", Arr::wrap($this->call_data));
         $start = now();
 
         try {
-            /** @var Response $response */
-            $response = \Cache::remember(
+            /** @var XmlResponse $response */
+            $response = Cache::remember(
                 $method . serialize($this->call_data),
                 static::$cache_responses_for,
                 function () use ($method) {
                     return $this->request()->post($method);
                 }
             );
-        } catch (\Exception $e) {
-            \Log::error("Exception - {$e->getMessage()}", optional($response)->json());
+        } catch (Exception $e) {
+            Log::error("Exception - {$e->getMessage()}", optional($response)->json());
         }
 
         $end = now();
 
 
         if ($response->status() >= 300) {
-            \Log::channel('outgoing')->info("   Response [" . $response->status() . "]", $response->data->toArray());
+            Log::channel('outgoing')->info("   Response [" . $response->status() . "]", $response->toArray());
         } else {
-            \Log::channel('outgoing')->info("Done" . json_encode([
+            Log::channel('outgoing')->info("Done" . json_encode([
                     'method'       => $method,
                     'request_time' => $end->since($start)
                 ], JSON_PRETTY_PRINT));
@@ -181,6 +151,37 @@ class YourmembershipApi
 
 
         return $response;
+    }
+
+    /**
+     * @return XmlRequest
+     */
+    protected function createRequest()
+    {
+        return (new XmlRequest())
+            ->baseUrl('https://api.yourmembership.com')
+            ->withOptions([
+                'body' => $this->getDefaultData()
+            ]);
+    }
+
+
+    protected function getAuthData()
+    {
+        $data = [
+            'ApiKey'     => $this->use_private_key ? $this->config('private_key') : $this->config("api_key"),
+            'SaPasscode' => $this->config('sa_passcode'),
+            'Version'    => $this->config('api_version')
+        ];
+
+
+        if (isset($this->call_data)) {
+            $data['Call'] = array_filter($this->call_data);
+        }
+
+        $data['CallID'] = Cache::increment($this->session_id);
+
+        return $data;
     }
 
     public function authenticate()
@@ -200,155 +201,6 @@ class YourmembershipApi
         );
     }
 
-    public function for($entity)
-    {
-        $this->for = $entity;
-
-        return $this;
-    }
-
-    public function registrations(array $args = [])
-    {
-        if (!$this->for instanceof Event) {
-            throw new \Exception("Unable to pull registrations for " . get_class($this->for));
-        }
-
-        $args['EventID'] = $this->for->EventID;
-//        'Status'    => $status,
-//            'FirstName' => $first_name,
-//            'LastName'  => $last_name
-
-        return collect(
-            $this->Sa_Events_Event_Registrations_Find($args)->data->first()
-        )
-            ->mapInto(Registration::class);
-    }
-
-    public function registration_ids($status = null)
-    {
-        if (!$this->for instanceof Event) {
-            throw new \Exception("Unable to pull registrations for " . get_class($this->for));
-        }
-
-        return collect($this->Sa_Events_Event_Registrations_GetIDs([
-            'EventID' => $this->for->EventID,
-            'Status'  => $status,
-        ])->data->first())->map(function ($item) {
-            return new Registration(array_merge([
-                'RegistrationID' => \Arr::get($item, '@content'),
-            ], \Arr::get($item, '@attributes')));
-        });
-
-    }
-
-    public function registration($id)
-    {
-        /** @var Response $response */
-        $response = $this->Sa_Events_Event_Registration_Get([
-            'RegistrationID' => $id
-        ]);
-
-        return new Registration($response->data->toArray());
-    }
-
-    public function people_ids(CarbonInterface $timestamp = null, $website_id = null)
-    {
-        return $this->Sa_People_All_GetIDs([
-            'Timestamp' => $timestamp,
-            'WebsiteID' => $website_id
-        ])->data
-            ->map(fn($data) => collect($data)->map(fn($data) => collect($data)))
-            ->get('People')
-            ->get('ID');
-    }
-
-    public function person($id)
-    {
-        return new Person($this->Sa_People_Profile_Get([
-            'ID' => $id
-        ])->data->toArray());
-    }
-
-
-    /**
-     * @param CarbonInterface|null $start_date
-     * @param CarbonInterface|null $end_date
-     * @param string|null $name
-     * @param string|null $status
-     * @param CarbonInterface|null $last_modified
-     * @return \Illuminate\Support\Collection
-     */
-    public function event_ids(CarbonInterface $start_date = null, CarbonInterface $end_date = null, string $name = null, string $status = null, CarbonInterface $last_modified = null)
-    {
-        return collect($this->Sa_Events_All_GetIDs(array_filter([
-            'StartDate'        => $start_date,
-            'EndDate'          => $end_date,
-            'Name'             => $name,
-            'Status'           => $status,
-            'LastModifiedDate' => $last_modified,
-        ]))->data->first());
-    }
-
-
-    private function request()
-    {
-        return (new Request())
-            ->baseUrl(static::BASE_URL)
-            ->withOptions([
-                'body' => $this->getDefaultData()
-            ]);
-    }
-
-    private function getDefaultData()
-    {
-        $data = [
-            'ApiKey'     => $this->use_private_key ? $this->config('private_key') : $this->config("api_key"),
-            'SaPasscode' => $this->config('sa_passcode'),
-            'Version'    => $this->config('api_version', '2.30')
-        ];
-
-        if (isset($this->session_id)) {
-            $data['SessionID'] = $this->session_id;
-        }
-
-        if (isset($this->call_data)) {
-            $data['Call'] = array_filter($this->call_data);
-        }
-
-        $data['CallID'] = \Cache::increment($this->session_id);
-
-        return $data;
-    }
-
-    private function ensureSessionIdPresent()
-    {
-        $this->session_id = \Cache::remember('yourmembership-session-id', 60, function () {
-            \Log::info('Requesting new Yourmembership session_id');
-            $response = $this->createSession();
-            $session_id = $response->xml(['Session.Create', 'SessionID']);
-
-            if (is_null($session_id)) {
-                throw new InvalidSessionId("Session Id is null: [ErrCode: " . $response->xml('ErrCode') . "] ErrDesc: " . $response->xml('ErrDesc'));
-            }
-
-            \Cache::increment($session_id);
-
-            return $session_id;
-        });
-
-    }
-
-    public function createSession()
-    {
-        return $this->request()->post('Session.Create');
-    }
-
-
-    public static function cacheResponses($seconds)
-    {
-        static::$cache_responses_for = $seconds;
-    }
-
     public function member_registration()
     {
         return $this->Sa_Members_Events_Event_Registration_Get([
@@ -356,7 +208,6 @@ class YourmembershipApi
             'EventID' => $this->for->getEventId()
         ])->data->first();
     }
-
 
     public function findEventByName($event_name)
     {
@@ -375,7 +226,7 @@ class YourmembershipApi
     public function getExportUrl($export_id)
     {
         do {
-            \Log::info('Attempting to retrieve ExportURI');
+            Log::info('Attempting to retrieve ExportURI');
 
             $response = static::Sa_Export_Status([
                 'ExportID' => $export_id
@@ -388,14 +239,14 @@ class YourmembershipApi
             $status = $response->data->get('Status');
 
             if ($url === null) {
-                \Log::info("Status: $status. Retrying in 3 seconds...");
+                Log::info("Status: $status. Retrying in 3 seconds...");
                 sleep(3);
             }
 
         } while ($url === null);
 
         try {
-            \Log::info("Export file retrieved: $url");
+            Log::info("Export file retrieved: $url");
         } finally {
             dump($url);
         }
@@ -403,10 +254,12 @@ class YourmembershipApi
         return $url;
     }
 
-    public function importRegistrationExport($url)
+    public function streamRegistrationExport($url, callable $closure)
     {
         if ($stream = fopen($url, 'r')) {
+
             $header = null;
+
             while (($buffer = fgets($stream)) !== false) {
                 $line = str_getcsv($buffer, ',', '');
 
@@ -422,7 +275,7 @@ class YourmembershipApi
                 $row = array_combine($header, $line);
 
                 $data = collect($row)->mapWithKeys(function ($v, $k) {
-                    $k = \Str::of($k)
+                    $k = Str::of($k)
                         ->replace(' ', '_')
                         ->lower();
 
@@ -433,21 +286,70 @@ class YourmembershipApi
                     return [(string)$k => $v];
                 });
 
-                /** @var \Corcel\Model\User $user_class */
-                $user_class = $this->config('user_class');
-                $user_class::storeCsvExport($data);
+                $closure($data);
 
             }
         }
     }
 
-    public function getUserMetaClass()
+    public function registrations(array $args = []): Collection
     {
-        return $this->config('usermeta_class');
+        if (!$this->for instanceof Event) {
+            throw new Exception("Unable to pull registrations for " . get_class($this->for));
+        }
+
+        $args['EventID'] = $this->for->EventID;
+//        'Status'    => $status,
+//            'FirstName' => $first_name,
+//            'LastName'  => $last_name
+
+        return collect($this->Sa_Events_Event_Registrations_Find($args)->data->first())
+            ->mapInto(Registration::class);
     }
 
-    public function getUserClass()
+    public function registration_ids($status = null): Collection
     {
-        return $this->config('user_class');
+        if (!$this->for instanceof Event) {
+            throw new Exception("Unable to pull registrations for " . get_class($this->for));
+        }
+
+        return collect($this->Sa_Events_Event_Registrations_GetIDs([
+            'EventID' => $this->for->EventID,
+            'Status'  => $status,
+        ])->data->first())->map(function ($item) {
+            return new Registration(array_merge([
+                'RegistrationID' => Arr::get($item, '@content'),
+            ], Arr::get($item, '@attributes')));
+        });
+    }
+
+    public function registration($id, $event_id = null): Registration
+    {
+        /** @var XmlResponse $response */
+        $response = $this->Sa_Events_Event_Registration_Get([
+            'RegistrationID' => $id
+        ]);
+
+        return new Registration($response->data->toArray());
+    }
+
+    public function people_ids(array $query = [])
+    {
+        return $this->Sa_People_All_GetIDs($query)->data
+            ->map(fn($data) => collect($data)->map(fn($data) => collect($data)))
+            ->get('People')
+            ->get('ID');
+    }
+
+    public function person($id)
+    {
+        return new Person($this->Sa_People_Profile_Get([
+            'ID' => $id
+        ])->data->toArray());
+    }
+
+    public function event_ids(array $query = []): Collection
+    {
+        return collect($this->Sa_Events_All_GetIDs(array_filter($query))->data->first());
     }
 }
