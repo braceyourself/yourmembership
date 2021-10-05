@@ -2,10 +2,18 @@
 
 namespace Braceyourself\Yourmembership;
 
+use Braceyourself\Yourmembership\Clients\Client;
 use Illuminate\Support\Str;
 
 class Yourmembership
 {
+    public static function mapInto(string $entity_name, array $attributes)
+    {
+        $class = static::getMappedClass($entity_name);
+
+        return new $class(...$attributes);
+    }
+
 
     public static function getMappedClass($entity_name)
     {

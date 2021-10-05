@@ -21,7 +21,9 @@ abstract class Model extends BaseModel
             throw new \Exception("Api Client required when creating " . static::class . " instance.");
         }
 
-        $this->api_client = $api;
+        $api = clone $api;
+
+        $this->api_client = $api->for($this);
     }
 
     public function isFillable($key)

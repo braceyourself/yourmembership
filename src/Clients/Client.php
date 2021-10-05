@@ -110,15 +110,15 @@ class Client
 
         $this->ensureSessionIdPresent();
 
+        $path = $this->preparePath(Arr::first($arguments), $this->getBasePath());
+        $data = Arr::get($arguments, 1, []);
+
+        dump(compact('path', 'data'));
+
         /** @var BaseResponse $response */
         $response = $this->request()->withHeaders(['x-ss-id' => $this->session_id])
             // send the request
-            ->$name(
-            // path
-                $this->preparePath(Arr::first($arguments), "/Ams/{$this->config('client_id')}/"),
-                // data/query
-                Arr::get($arguments, 1, [])
-            );
+            ->$name($path, $data);
 
         // throw errors
         if ($response->hasErrors()) {
@@ -162,6 +162,10 @@ class Client
 
     public function for($entity)
     {
+        if (!$entity instanceof Model) {
+            throw new \Exception("Cannot use type of " . get_class($entity) . " as 'for' in YM Api Client");
+        }
+
         $this->for = $entity;
 
         return $this;
@@ -252,25 +256,33 @@ class Client
 
     public function registrations(array $query = []): Collection
     {
-        $res = $this->get("Event/{EventID}/EventRegistrants", array_merge([
+        $res = $this->get("Event/{EventId}/EventRegistrants", array_merge([
             'BypassCache' => 'true'
-        ], $query))->json('EventRegistrantsList');
+        ], $query));
 
-        $class = Yourmembership::getMappedClass('registration');
+        $data = collect($res->json('EventRegistrantsList'));
 
-        return collect($res)->map(fn($v) => new $class($v, $this));
+        return $data->map(function ($v) {
+            $class = Yourmembership::getMappedClass('registration');
+
+            return tap(new $class($v, $this), function ($instance) {
+                // set the 'foreign_key'
+                $instance->{$this->for->getKeyName()} = $this->for->getKey();
+            });
+
+        });
     }
 
     public function registration_ids($status = null): Collection
     {
-        $res = $this->get("Event/{EventID}/EventRegistrationIDs");
+        $res = $this->get("Event/{EventId}/EventRegistrationIDs");
 
         return collect($res->json('EventRegistrationsID'))->pluck('RegistrantID');
     }
 
-    public function registration($id, $event_id = '{EventID}'): Registration
+    public function registration($id, $event_id = '{EventId}'): Registration
     {
-        $data = $this->get("Event/$event_id/EventRegistrations", [
+        $res = $this->get("Event/$event_id/EventRegistrations", [
             'RegistrationID' => $id
         ])->json('EventRegistrationRegistrant');
 

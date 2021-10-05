@@ -3,6 +3,7 @@
 use App\Jobs\ApiRequest;
 use App\Models\Wordpress\Srnt\User;
 use Braceyourself\Yourmembership\Client;
+use Illuminate\Support\Collection;
 
 /**
  * @property string $RegistrationID
@@ -19,6 +20,7 @@ use Braceyourself\Yourmembership\Client;
  * @property string $title
  * @property string $company
  * @property string $nickname
+ * @property Collection $form_data
  *
  * Class Registration
  * @package Braceyourself\Yourmembership\Models
@@ -28,7 +30,8 @@ class Registration extends Model
     protected $primaryKey = 'RegistrationID';
     protected $keyType = 'string';
     protected $appends = [
-        'type'
+        'type',
+        'form_data',
     ];
 
 
@@ -96,7 +99,7 @@ class Registration extends Model
     {
         $details = $this->api()->registration($this->RegistrationID);
 
-        $this->attributes = $details->getAttributes();
+        $this->attributes = array_merge($this->attributes, $details->getAttributes());
 
         return $this;
     }
@@ -104,6 +107,32 @@ class Registration extends Model
     /*******************************************************
      * attributes
      ******************************************************/
+    /**
+     * Accessor for $this->form_data
+     **/
+    public function getFormDataAttribute()
+    {
+        if (isset($this->attributes['CustomFormDataSet'])) {
+
+            return collect($this->attributes['CustomFormDataSet'])->mapWithKeys(function ($v) {
+                $key = \Str::of($v['Name']);
+                $value = $v['Values'];
+
+                if (count($value) === 1) {
+                    $value = \Arr::first($value);
+                }
+
+                $key = $key->replaceFirst('Custom_', '')
+                    ->replaceFirst('str', '')
+                    ->snake();
+
+                return ["$key" => $value];
+            });
+        }
+
+        return null;
+    }
+
     /**
      * Mutator for $this->email_address
      * @param $value
