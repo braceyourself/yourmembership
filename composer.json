@@ -41,10 +41,7 @@
     "laravel": {
       "providers": [
         "Braceyourself\\Yourmembership\\YourmembershipServiceProvider"
-      ],
-      "aliases": {
-        "Yourmembership": "Srnt"
-      }
+      ]
     }
   }
 }
