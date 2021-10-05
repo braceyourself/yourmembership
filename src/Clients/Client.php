@@ -33,7 +33,7 @@ class Client
      */
     private $use_private_key;
     private $call_data;
-    protected Model $for;
+    public $for;
 
     private array $config;
     private $connection_name;
@@ -284,12 +284,13 @@ class Client
     {
         $res = $this->get("Event/$event_id/EventRegistrations", [
             'RegistrationID' => $id
-        ])->json('EventRegistrationRegistrant');
+        ]);
 
-        $class = Yourmembership::getMappedClass('registration');
+        $data = $res->json('EventRegistrationRegistrant');
 
-        return new $class($data, $this);
+        return Yourmembership::mapInto('registration', [$data, $this]);
     }
+
 
     public function people_ids(array $query = [])
     {
@@ -361,11 +362,19 @@ class Client
         unset($matches[0]);
 
         $matches = collect($matches)->map(function ($match) {
+            $attribute = $match;
+
             if ($entity = $this->for) {
-                $value = $entity->$match ?? $entity->getKey() ?? $entity->id;
+                $value = $entity->$attribute;
+            }
+
+            if ($value === null) {
+                dump($entity);
+                throw new \Exception("Could not find attribute '$attribute' on model of class: " . get_class($entity));
             }
 
             return $value;
+
         })->toArray();
 
         return preg_replace_array($pattern, $matches, $path);
@@ -378,4 +387,8 @@ class Client
         return count($matches) > 1;
     }
 
+    public function getBasePath()
+    {
+        return "/Ams/{$this->config('client_id')}/";
+    }
 }
