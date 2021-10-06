@@ -112,25 +112,29 @@ class Registration extends Model
      **/
     public function getFormDataAttribute()
     {
-        if (isset($this->attributes['CustomFormDataSet'])) {
+        $data_set = array_merge(
+            $this->attributes['CustomFormDataSet'] ?? [],
+            $this->attributes['DataSet'] ?? [],
+        );
 
-            return collect($this->attributes['CustomFormDataSet'])->mapWithKeys(function ($v) {
-                $key = \Str::of($v['Name']);
-                $value = $v['Values'];
+        return collect($data_set)->mapWithKeys(function ($v) {
+            $key = \Str::of($v['Name']);
+            $value = $v['Values'];
 
-                if (count($value) === 1) {
-                    $value = \Arr::first($value);
-                }
+            if (is_array($value) && count($value) === 1) {
+                $value = \Arr::first($value);
+            }
 
-                $key = $key->replaceFirst('Custom_', '')
-                    ->replaceFirst('str', '')
-                    ->snake();
+            if (is_array($value) && empty($value)) {
+                $value = null;
+            }
 
-                return ["$key" => $value];
-            });
-        }
+            $key = $key->replaceFirst('Custom_', '')
+                ->replaceFirst('str', '')
+                ->snake();
 
-        return null;
+            return ["$key" => $value];
+        })->filter();
     }
 
     /**
@@ -165,7 +169,7 @@ class Registration extends Model
     public
     function getEmailAttribute($value)
     {
-        return $this->dataSetValue('strEmail', $value);
+        return $this->dataSetValue('strEmail', $value ?? $this->form_data->get('email'));
     }
 
 //* @property string $first_name
@@ -208,6 +212,16 @@ class Registration extends Model
     {
         $this->attributes['registered_at'] = $value;
     }
+    
+    /**
+     * Mutator for $this->DateRegistered
+     * @param $value
+     */
+    public function setDateRegisteredAttribute($value)
+    {
+        $this->attributes['registered_at'] = $value;
+    }
+    
 
 
 //* @property string $full_name
@@ -294,9 +308,6 @@ class Registration extends Model
     public function loadEventMemberDetails()
     {
         $data = $this->api()->member_registration();
-
-
-        dd(__FUNCTION__, $data);
     }
 
     public function getEventId()

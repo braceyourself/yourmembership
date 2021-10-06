@@ -113,8 +113,6 @@ class Client
         $path = $this->preparePath(Arr::first($arguments), $this->getBasePath());
         $data = Arr::get($arguments, 1, []);
 
-        dump(compact('path', 'data'));
-
         /** @var BaseResponse $response */
         $response = $this->request()->withHeaders(['x-ss-id' => $this->session_id])
             // send the request
@@ -369,7 +367,6 @@ class Client
             }
 
             if ($value === null) {
-                dump($entity);
                 throw new \Exception("Could not find attribute '$attribute' on model of class: " . get_class($entity));
             }
 
@@ -390,5 +387,10 @@ class Client
     public function getBasePath()
     {
         return "/Ams/{$this->config('client_id')}/";
+    }
+
+    public function getApiConnectionName()
+    {
+        return $this->connection_name;
     }
 }
