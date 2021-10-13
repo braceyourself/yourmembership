@@ -25,20 +25,17 @@ use Nette\NotImplementedException;
  */
 class Client
 {
-    public static $cache_responses_for = 0;
-
-    protected $session_id;
     /**
      * @var Factory
      */
-    private $use_private_key;
-    private $call_data;
     public $for;
-
-    private array $config;
-    private $connection_name;
+    public static $cache_responses_for = 0;
+    public $session_id;
+    protected array $config;
+    protected $connection_name;
     protected $user_id;
     protected $auth_path = '/Ams/Authenticate';
+    protected $request;
 
     /**
      * YourmembershipApi constructor.
@@ -65,18 +62,21 @@ class Client
 
     protected function request()
     {
-        return $this->createRequest();
+        return $this->createRequest(fn(&$r) => $r->acceptJson());
     }
 
     /**
      * @return Request
      */
-    protected function createRequest()
+    protected function createRequest(callable $tap = null)
     {
-        return (new Request())
+        $request = (new Request())
             ->asJson()
-            ->acceptJson()
             ->baseUrl('https://ws.yourmembership.com');
+
+        return $tap
+            ? tap($request, $tap)
+            : $request->acceptJson();
     }
 
     protected function getDefaultData()
@@ -105,7 +105,9 @@ class Client
     {
         // return the request if the called method is not a http verb
         if (!in_array($name, ['get', 'post', 'put', 'patch', 'delete', 'head'])) {
-            return $this->request()->$name(...$arguments);
+            $this->request = $this->request()->$name(...$arguments);
+
+            return $this;
         }
 
         $this->ensureSessionIdPresent();
@@ -114,12 +116,15 @@ class Client
         $data = Arr::get($arguments, 1, []);
 
         /** @var BaseResponse $response */
-        $response = $this->request()->withHeaders(['x-ss-id' => $this->session_id])
+        $response = $this->request()
+            ->withHeaders(['x-ss-id' => $this->session_id])
             // send the request
             ->$name($path, $data);
 
         // throw errors
         if ($response->hasErrors()) {
+            $this->log($response->json(), $response->json());
+
             throw new HttpException($response->getErrorAsString());
         }
 
@@ -154,7 +159,7 @@ class Client
      */
     public function createSession()
     {
-        return $this->request()->post($this->getAuthPath(), $this->getAuthData());
+        return $this->createRequest()->post($this->getAuthPath(), $this->getAuthData());
     }
 
 
@@ -244,12 +249,12 @@ class Client
 
     public function createRegistrationsExport($event_id)
     {
-        throw new NotImplementedException();
+        return null;
     }
 
-    public function getExportUrl($export_id)
+    public function getExportUrl($export_id): string
     {
-        throw new NotImplementedException();
+        return "Event/{EventId}/EventRegistrants";
     }
 
     public function registrations(array $query = []): Collection
@@ -284,7 +289,9 @@ class Client
             'RegistrationID' => $id
         ]);
 
-        $data = $res->json('EventRegistrationRegistrant');
+        $data = collect($res->json('EventRegistrationRegistrant'))
+            ->toArray();
+
 
         return Yourmembership::mapInto('registration', [$data, $this]);
     }
@@ -324,14 +331,18 @@ class Client
             ->map(fn($v) => data_get($v, 'ID'));
     }
 
-    public function streamRegistrationExport($url, callable $closure)
+    public function streamExport($url, callable $closure)
     {
-        throw new NotImplementedException();
+        $this->request = $this->createRequest(fn($r) => $r->accept('text/csv'));
+
+        $res = $this->get($url);
+
+        dd($res->body());
     }
 
     public function importRegistrationExport($url)
     {
-        $this->streamRegistrationExport($url, function ($row) {
+        $this->streamExport($url, function ($row) {
             $user_class = $this->config('user_class');
             $user_class::storeCsvExport($row);
         });
@@ -392,5 +403,14 @@ class Client
     public function getApiConnectionName()
     {
         return $this->connection_name;
+    }
+
+    protected function log($message, $context = null)
+    {
+        if (!app()->environment('production')) {
+            dump($message);
+        }
+
+        \Log::info($message, $context);
     }
 }

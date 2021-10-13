@@ -33,6 +33,10 @@ abstract class Model extends BaseModel
         return !$this->isGuarded($key);
     }
 
+    /**
+     * @return Client|\Braceyourself\Yourmembership\Clients\V230\Client
+     * @throws \Exception
+     */
     public function api(): Client
     {
         return optional($this->api_client)->for($this);

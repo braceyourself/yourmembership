@@ -27,7 +27,7 @@ use Str;
  * @method Member_Certifications_Get    60
  * @method Member_Certifications_Journal_Get    60
  * @method Member_Commerce_Store_GetOrderIDs    60
- * @method Member_Commerce_Store_Order_Get    60
+ * @method Member_Commerce_Store_Order_Get(array $args)    60
  * @method Member_Connection_Approve    20
  * @method Member_IsAuthenticated    60
  * @method Member_MediaGallery_Upload    20
@@ -55,7 +55,7 @@ use Str;
  * @method Sa_Commerce_Product_Get    60
  * @method Sa_Commerce_Product_Update    60
  * @method Sa_Commerce_Products_All_GetIDs    60
- * @method Sa_Commerce_Store_Order_Get    60
+ * @method Sa_Commerce_Store_Order_Get(array $args)    60
  * @method Sa_Events_All_GetIDs(array $args)    60
  * @method Sa_Events_Event_Get(array $args)    60
  * @method Sa_Events_Event_Registration_Attendance_Update    120
@@ -110,6 +110,9 @@ use Str;
  */
 class Client extends \Braceyourself\Yourmembership\Clients\Client
 {
+
+    protected $use_private_key;
+    protected $call_data;
     protected $auth_path = "Session.Create";
 
     public function __call($name, $arguments)
@@ -139,8 +142,7 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
 
         $end = now();
 
-
-        if ($response->status() >= 300) {
+        if ($response->status() >= 300 || $response->xml('ErrCode') !== null) {
             Log::channel('outgoing')->info("   Response [" . $response->status() . "]", $response->toArray());
         } else {
             Log::channel('outgoing')->info("Done" . json_encode([
@@ -156,13 +158,26 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
     /**
      * @return XmlRequest
      */
-    protected function createRequest()
+    protected function createRequest(callable $tap = null)
     {
-        return (new XmlRequest())
+        $r = (new XmlRequest())
             ->baseUrl('https://api.yourmembership.com')
             ->withOptions([
-                'body' => $this->getDefaultData()
+                'body' => array_merge($this->getDefaultData(), $this->getAuthData())
             ]);
+
+
+        return $tap ? tap($r, $tap) : $r;
+
+    }
+
+    protected function getDefaultData()
+    {
+        return tap($this->getAuthData(), function ($data) {
+            if (isset($this->session_id)) {
+                $data['SessionID'] = $this->session_id;
+            }
+        });
     }
 
 
@@ -197,7 +212,8 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
     public function event($event_id): Event
     {
         return new Event(
-            $this->Sa_Events_Event_Get(['EventID' => $event_id])->data->toArray()
+            $this->Sa_Events_Event_Get(['EventID' => $event_id])->data->toArray(),
+            app()->make("ym.$this->connection_name")
         );
     }
 
@@ -216,6 +232,7 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
         ])->data;
     }
 
+
     public function createRegistrationsExport($event_id)
     {
         return $this->Sa_Export_Event_Registrations([
@@ -223,19 +240,25 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
         ])->data->get('ExportID');
     }
 
-    public function getExportUrl($export_id)
+    public function getExportUrl($export_id): string
     {
         do {
-            Log::info('Attempting to retrieve ExportURI');
+            $this->log('Attempting to retrieve ExportURI');
 
             $response = static::Sa_Export_Status([
                 'ExportID' => $export_id
             ]);
 
+            $status = static::getExportStatusMessage($response->data->get('Status'));
+
+            $this->log("status: $status");
+
             $url = $response->data->get('ExportURI');
+
             if ($url === []) {
                 $url = null;
             }
+
             $status = $response->data->get('Status');
 
             if ($url === null) {
@@ -245,16 +268,12 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
 
         } while ($url === null);
 
-        try {
-            Log::info("Export file retrieved: $url");
-        } finally {
-            dump($url);
-        }
+        $this->log("Export file retrieved: $url");
 
         return $url;
     }
 
-    public function streamRegistrationExport($url, callable $closure)
+    public function streamExport($url, callable $closure)
     {
         if ($stream = fopen($url, 'r')) {
 
@@ -304,7 +323,9 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
 //            'LastName'  => $last_name
 
         return collect($this->Sa_Events_Event_Registrations_Find($args)->data->first())
-            ->mapInto(Registration::class);
+            ->map(function ($r) {
+                return new Registration($r, app()->make("ym.$this->connection_name"));
+            });
     }
 
     public function registration_ids($status = null): Collection
@@ -325,12 +346,12 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
 
     public function registration($id, $event_id = null): Registration
     {
-        /** @var XmlResponse $response */
-        $response = $this->Sa_Events_Event_Registration_Get([
-            'RegistrationID' => $id
-        ]);
-
-        return new Registration($response->data->toArray());
+        return new Registration(
+            $this->Sa_Events_Event_Registration_Get([
+                'RegistrationID' => $id
+            ])->data->toArray(),
+            app()->make("ym.$this->connection_name")
+        );
     }
 
     public function people_ids(array $query = [])
@@ -352,4 +373,43 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
     {
         return collect($this->Sa_Events_All_GetIDs(array_filter($query))->data->first());
     }
+
+    public function events()
+    {
+        return $this->Sa_Events_All_GetIDs()->data->flatten()->map(function ($event_id) {
+            return $this->event($event_id);
+        });
+    }
+
+    public function products()
+    {
+        return $this->Sa_Commerce_Products_All_GetIDs()->data->flatten()->map(function ($id) {
+            return $this->Sa_Commerce_Product_Get(['ProductID' => $id])->data->dd();
+        })->dd();
+    }
+
+    public function invoices()
+    {
+        $res = $this->Sa_Export_All_InvoiceItems();
+
+        dd($res->xml());
+    }
+
+    public static function getExportStatusMessage($status_code)
+    {
+        switch ($status_code) {
+            case 0:
+                return 'Unknown';
+            case 1:
+                return "Working";
+            case 2:
+                return "Complete";
+            case -1:
+                return "Failure";
+            default:
+                throw new \Exception("Unknown export status code: $status_code");
+        }
+
+    }
+
 }

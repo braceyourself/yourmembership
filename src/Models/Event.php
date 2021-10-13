@@ -51,8 +51,18 @@ class Event extends Model
         return $this->api()->createRegistrationsExport($this->EventId);
     }
 
-    public function getExportUrl($export_id)
+    public function streamRegistrationExport(callable $closure)
     {
+        $this->api()->streamExport(
+            $this->getExportUrl($this->createRegistrationExport()),
+            $closure
+        );
+    }
+
+    public function getExportUrl($export_id = null)
+    {
+        $export_id = $export_id ?? $this->createRegistrationExport();
+
         return $this->api()->getExportUrl($export_id);
     }
 
@@ -68,7 +78,7 @@ class Event extends Model
 
     public function registration($registration_id): Registration
     {
-        return $this->api()->registration($registration_id);
+        return tap($this->api()->registration($registration_id))->setAttribute('EventId', $this->EventId);
     }
 
     /*******************************************************

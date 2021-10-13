@@ -212,7 +212,7 @@ class Registration extends Model
     {
         $this->attributes['registered_at'] = $value;
     }
-    
+
     /**
      * Mutator for $this->DateRegistered
      * @param $value
@@ -221,7 +221,7 @@ class Registration extends Model
     {
         $this->attributes['registered_at'] = $value;
     }
-    
+
 
 
 //* @property string $full_name
@@ -341,5 +341,32 @@ class Registration extends Model
     public function dataSetValue($key, $default = null)
     {
         return data_get($this->attributes, "DataSet.$key.@attributes.ExportValue", $default);
+    }
+
+    public function isCancelled()
+    {
+        return $this->Status === 'Cancelled';
+    }
+
+    /**
+     * @return Collection
+     */
+    public function order()
+    {
+        return \Cache::remember("$this->registration_id-registration-order-details", 60 * 5, function () {
+            return $this->api()->Sa_Commerce_Store_Order_Get([
+                'InvoiceID' => $this->InvoiceID
+            ]);
+        })->data;
+    }
+
+    public function products()
+    {
+        return $this->order()->get('Products');
+    }
+
+    public function member()
+    {
+        return $this->api()->registrations();
     }
 }
