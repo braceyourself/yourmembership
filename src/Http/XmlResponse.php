@@ -33,8 +33,17 @@ class XmlResponse extends BaseResponse
 
     public function xml($key = null, $default = null)
     {
+//        $xml = (string)\Str::of(html_entity_decode($this->body()));
+//            ->replaceMatches('/<p>([^<]*)<\/p>/', fn($m) => $m[1] ?? null)
+//            ->replaceMatches('/<a href=".*">(.*)<\/a>/', fn($m) => $m[1] ?? null);
+        $xml = $this->body();
+
         if (!$this->decoded) {
-            $this->decoded = XmlToArray::convert($this->body());
+            try {
+                $this->decoded = XmlToArray::convert($xml);
+            } catch (\ErrorException $e) {
+                throw new XmlParserException($e->getMessage(), $e->getCode(), $e);
+            }
         }
 
         if (is_null($key)) {
