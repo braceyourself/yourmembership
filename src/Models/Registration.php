@@ -35,69 +35,9 @@ class Registration extends Model
     ];
 
 
-    protected static function boot()
-    {
-        parent::boot();
-
-        static::saving(function (Registration $model) {
-            $model->updateUserViaApi();
-            // exit the saving of this 'Registration' object
-            return false;
-        });
-    }
-
-    public function updateUserViaApi()
-    {
-        $this->loadDetails();
-
-        if (!isset($this->email)) {
-            return;
-        }
-
-        /** @var User $user */
-        $user = User::query()->firstOrCreate([
-            'user_login' => $this->email,
-        ], [
-            'user_pass' => 'SRNT2021',
-        ]);
-
-        $user->update([
-            'user_email'      => $this->email,
-            'user_nicename'   => $this->nickname,
-            'user_registered' => $this->registered_at,
-            'display_name'    => $this->full_name,
-        ]);
-
-
-        $user->saveMeta([
-            'first_name'                        => $this->first_name,
-            'last_name'                         => $this->last_name,
-            'title'                             => $this->title,
-            'company'                           => $this->company,
-            'registration_id'                   => $this->registration_id,
-            'strEmail'                          => $this->email,
-            'BadgeNumber'                       => $this->BadgeNumber,
-            'AttendeeType'                      => $this->AttendeeType,
-            'Custom_Nickname'                   => $this->dataSetValue('Custom_Nickname'),
-            'strEmployerName'                   => $this->dataSetValue('strEmployerName'),
-            'Custom_VirtualMeetingPresenter'    => $this->dataSetValue('Custom_VirtualMeetingPresenter'),
-            'Custom_PreConferenceSession'       => $this->dataSetValue('Custom_PreConferenceSession'),
-            'Custom_TobaccoIndustryAffiliation' => $this->dataSetValue('Custom_TobaccoIndustryAffiliation'),
-            'Sessions'                          => json_encode($this->Sessions),
-            'Type'                              => $this->type,
-            'updated_at'                        => now(),
-        ]);
-
-//            'wp_capabilities'                   => serialize(['attendee' => true, $this->type => true]),
-        $user->capabilities = 'attendee';
-        $user->capabilities = $this->type;
-
-        \Log::info('Saved User: ' . $user->user_login);
-    }
-
     public function loadDetails()
     {
-        $details = $this->api()->registration($this->RegistrationID);
+        $details = $this->api()->cacheResponse(60 * 30)->registration($this->RegistrationID);
 
         $this->attributes = array_merge($this->attributes, $details->getAttributes());
 
@@ -117,16 +57,17 @@ class Registration extends Model
             $this->attributes['DataSet'] ?? [],
         );
 
-        return collect($data_set)->mapWithKeys(function ($v) {
-            $key = \Str::of($v['Name']);
-            $value = $v['Values'];
+        return collect($data_set)->mapWithKeys(function ($v, $k) {
 
-            if (is_array($value) && count($value) === 1) {
-                $value = \Arr::first($value);
-            }
+            $key = \Str::of($v['Name'] ?? $k);
+            $value = $v['Values'] ?? $v['Value'];
 
-            if (is_array($value) && empty($value)) {
-                $value = null;
+            if (is_array($value)) {
+                if (count($value) === 1) {
+                    $value = \Arr::first($value);
+                } else if (empty($value)) {
+                    $value = null;
+                }
             }
 
             $key = $key->replaceFirst('Custom_', '')
@@ -353,7 +294,7 @@ class Registration extends Model
      */
     public function order()
     {
-        return \Cache::remember("$this->registration_id-registration-order-details", 60 * 5, function () {
+        return \Cache::remember("$this->registration_id-registration-order-details", 60 * 60, function () {
             return $this->api()->Sa_Commerce_Store_Order_Get([
                 'InvoiceID' => $this->InvoiceID
             ]);
@@ -362,7 +303,13 @@ class Registration extends Model
 
     public function products()
     {
-        return $this->order()->get('Products');
+        $data = collect(data_get($this->order(), 'Order.Products'))->mapInto(Collection::class);
+
+        if ($data->first()->has('ProductID') === false) {
+            return $data->collapse();
+        }
+
+        return $data;
     }
 
     public function member()
