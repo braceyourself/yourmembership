@@ -29,13 +29,13 @@ class Client
      * @var Factory
      */
     public $for;
-    public static $cache_responses_for = 0;
     public $session_id;
     protected array $config;
     protected $connection_name;
     protected $user_id;
     protected $auth_path = '/Ams/Authenticate';
     protected $request;
+    protected int $cache = 0;
 
     /**
      * YourmembershipApi constructor.
@@ -116,19 +116,24 @@ class Client
         $data = Arr::get($arguments, 1, []);
 
         /** @var BaseResponse $response */
-        $response = $this->request()
-            ->withHeaders(['x-ss-id' => $this->session_id])
-            // send the request
-            ->$name($path, $data);
+        return Cache::remember("{$this->getApiConnectionName()}.$this->session_id.$name.$path." . serialize($data), $this->getCacheTime(), function () use ($name, $path, $data) {
 
-        // throw errors
-        if ($response->hasErrors()) {
-            $this->log($response->json(), $response->json());
+            $response = $this->request()
+                ->withHeaders(['x-ss-id' => $this->session_id])
+                // send the request
+                ->get($path, $data);
 
-            throw new HttpException($response->getErrorAsString());
-        }
+            // throw errors
+            if ($response->hasErrors()) {
+                $this->log($response->json(), $response->json());
 
-        return $response;
+                throw new HttpException($response->getErrorAsString());
+            }
+
+            return $response;
+        });
+
+
     }
 
     protected function ensureSessionIdPresent()
@@ -174,10 +179,6 @@ class Client
         return $this;
     }
 
-    public static function cacheResponses($seconds)
-    {
-        static::$cache_responses_for = $seconds;
-    }
 
     public function authenticate()
     {
@@ -259,7 +260,7 @@ class Client
 
     public function registrations(array $query = []): Collection
     {
-        $res = $this->get("Event/{EventId}/EventRegistrants", array_merge([
+        $res = $this->cacheResponse(60 * 5)->get("Event/{EventId}/EventRegistrants", array_merge([
             'BypassCache' => 'true'
         ], $query));
 
@@ -283,9 +284,10 @@ class Client
         return collect($res->json('EventRegistrationsID'))->pluck('RegistrantID');
     }
 
+
     public function registration($id, $event_id = '{EventId}'): Registration
     {
-        $res = $this->get("Event/$event_id/EventRegistrations", [
+        $res = $this->cacheResponse(60 * 5)->get("Event/$event_id/EventRegistrations", [
             'RegistrationID' => $id
         ]);
 
@@ -412,5 +414,22 @@ class Client
         }
 
         \Log::info($message, $context);
+    }
+
+
+    public function cacheResponse($for = 0)
+    {
+        $this->cache = $for;
+
+        return $this;
+    }
+
+    public function getCacheTime()
+    {
+        $time = $this->cache;
+
+        $this->cache = 0;
+
+        return $time;
     }
 }

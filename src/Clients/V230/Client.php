@@ -7,6 +7,7 @@ use Braceyourself\Yourmembership\Http\XmlResponse;
 use Braceyourself\Yourmembership\Models\Event;
 use Braceyourself\Yourmembership\Models\Person;
 use Braceyourself\Yourmembership\Models\Registration;
+use Braceyourself\Yourmembership\Yourmembership;
 use Cache;
 use Carbon\CarbonInterface;
 use Exception;
@@ -114,6 +115,7 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
     protected $use_private_key;
     protected $call_data;
     protected $auth_path = "Session.Create";
+    public static $cache_responses_for = 0;
 
     public function __call($name, $arguments)
     {
@@ -125,34 +127,30 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
         $this->call_data = Arr::first($arguments);
 
         Log::channel('outgoing')->info("$method", Arr::wrap($this->call_data));
-        $start = now();
 
-        try {
-            /** @var XmlResponse $response */
-            $response = Cache::remember(
-                $method . serialize($this->call_data),
-                static::$cache_responses_for,
-                function () use ($method) {
-                    return $this->request()->post($method);
+        $cache_key = $this->getApiConnectionName() . $method . serialize($this->call_data);
+
+        return Cache::remember($cache_key, $this->getCacheTime(), function () use ($method) {
+
+            return tap($this->request()->post($method), function (XmlResponse $response) use ($method) {
+
+                if ($response->status() >= 300 || $response->xml('ErrCode') !== null) {
+                    Log::channel('outgoing')->info("   Response [" . $response->status() . "]", $response->toArray());
+                } else {
+                    Log::channel('outgoing')->info("Done" . json_encode([
+                            'method' => $method,
+                        ], JSON_PRETTY_PRINT));
                 }
-            );
-        } catch (Exception $e) {
-            Log::error("Exception - {$e->getMessage()}", optional($response)->json());
-        }
 
-        $end = now();
-
-        if ($response->status() >= 300 || $response->xml('ErrCode') !== null) {
-            Log::channel('outgoing')->info("   Response [" . $response->status() . "]", $response->toArray());
-        } else {
-            Log::channel('outgoing')->info("Done" . json_encode([
-                    'method'       => $method,
-                    'request_time' => $end->since($start)
-                ], JSON_PRETTY_PRINT));
-        }
+            });
 
 
-        return $response;
+        });
+    }
+
+    public static function cacheResponses($seconds)
+    {
+        static::$cache_responses_for = $seconds;
     }
 
     /**
@@ -383,9 +381,11 @@ class Client extends \Braceyourself\Yourmembership\Clients\Client
 
     public function products()
     {
-        return $this->Sa_Commerce_Products_All_GetIDs()->data->flatten()->map(function ($id) {
-            return $this->Sa_Commerce_Product_Get(['ProductID' => $id])->data->dd();
-        })->dd();
+        return $this->cacheResponse(60 * 60)->Sa_Commerce_Products_All_GetIDs()->data->flatten()->map(function ($id) {
+            $data = $this->cacheResponse(60 * 5)->Sa_Commerce_Product_Get(['ProductID' => $id])->data->toArray();
+
+            return Yourmembership::mapInto('product', [$data, $this]);
+        });
     }
 
     public function invoices()
