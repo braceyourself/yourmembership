@@ -305,7 +305,7 @@ class Registration extends Model
     {
         $data = collect(data_get($this->order(), 'Order.Products'))->mapInto(Collection::class);
 
-        if ($data->first()->has('ProductID') === false) {
+        if ($data->count() && $data->first()->has('ProductID') === false) {
             return $data->collapse();
         }
 
